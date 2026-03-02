@@ -21,9 +21,17 @@ from director.tools.stabilityai import (
     StabilityAITool,
     PARAMS_CONFIG as STABILITYAI_PARAMS_CONFIG,
 )
+from director.tools.volcengine_tool import (
+    VolcengineArkTool, 
+    PARAMS_CONFIG as VOLCENGINE_PARAMS_CONFIG,
+)
 from director.tools.elevenlabs import (
     ElevenLabsTool,
     PARAMS_CONFIG as ELEVENLABS_PARAMS_CONFIG,
+)
+from director.tools.volcengine_audio import (
+    VolcengineAudioTool,
+    PARAMS_CONFIG as VOLCENGINE_AUDIO_PARAMS_CONFIG,
 )
 from director.tools.videodb_tool import VDBAudioGenerationTool, VDBVideoGenerationTool, VideoDBTool
 from director.constants import DOWNLOADS_PATH
@@ -31,8 +39,8 @@ from director.constants import DOWNLOADS_PATH
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENGINES = ["stabilityai", "kling", "videodb"]
-SUPPORTED_AUDIO_ENGINES = ["elevenlabs", "videodb"]
+SUPPORTED_ENGINES = ["stabilityai", "kling", "videodb", "volcengine"]
+SUPPORTED_AUDIO_ENGINES = ["elevenlabs", "videodb", "volcengine"]
 TEXT_TO_MOVIE_AGENT_PARAMETERS = {
     "type": "object",
     "properties": {
@@ -79,10 +87,20 @@ TEXT_TO_MOVIE_AGENT_PARAMETERS = {
                     "description": "Optional configuration for Kling engine",
                     "properties": KLING_PARAMS_CONFIG["text_to_video"],
                 },
+                "video_volcengine_config": {
+                    "type": "object",
+                    "description": "Optional configuration for Volcengine engine",
+                    "properties": VOLCENGINE_PARAMS_CONFIG["text_to_video"],
+                },
                 "audio_elevenlabs_config": {
                     "type": "object",
                     "description": "Optional configuration for ElevenLabs engine",
                     "properties": ELEVENLABS_PARAMS_CONFIG["sound_effect"],
+                },
+                "audio_volcengine_config": {
+                    "type": "object",
+                    "description": "Optional configuration for Volcengine audio engine",
+                    "properties": VOLCENGINE_AUDIO_PARAMS_CONFIG["text_to_speech"],
                 },
             },
             "required": ["storyline"],
@@ -152,6 +170,12 @@ class TextToMovieAgent(BaseAgent):
                 preferred_style="cinematic",
                 prompt_format="detailed",
             ),
+            "volcengine": EngineConfig(
+                name="volcengine",
+                max_duration=5,
+                preferred_style="cinematic",
+                prompt_format="detailed",
+            ),
         }
         super().__init__(session=session, **kwargs)
 
@@ -205,6 +229,12 @@ class TextToMovieAgent(BaseAgent):
             elif engine == "videodb":
                 self.video_gen_config_key = "video_kling_config"
                 self.video_gen_tool = VDBVideoGenerationTool()
+            elif engine == "volcengine":
+                ARK_API_KEY = os.getenv("ARK_API_KEY")
+                if not ARK_API_KEY:
+                    raise Exception("Volcengine ARK_API_KEY not found")
+                self.video_gen_tool = VolcengineArkTool(api_key=ARK_API_KEY)
+                self.video_gen_config_key = "video_volcengine_config"
             else:
                 raise Exception(f"{engine} not supported")
 
@@ -216,7 +246,12 @@ class TextToMovieAgent(BaseAgent):
                 if not ELEVENLABS_API_KEY:
                     raise Exception("ElevenLabs API key not found")
                 self.audio_gen_tool = ElevenLabsTool(api_key=ELEVENLABS_API_KEY)
-
+            elif audio_engine == "volcengine":
+                VOLCENGINE_TTS_APPID = os.getenv("VOLCENGINE_TTS_APPID")
+                VOLCENGINE_TTS_ACCESS_TOKEN = os.getenv("VOLCENGINE_TTS_ACCESS_TOKEN")
+                # Wait, if they are not explicitly in env but exist, the adapter will use Defaults or throw later
+                self.audio_gen_tool = VolcengineAudioTool(app_id=VOLCENGINE_TTS_APPID, access_token=VOLCENGINE_TTS_ACCESS_TOKEN)
+                self.audio_gen_config_key = "audio_volcengine_config"
             else:
                 self.audio_gen_tool = VDBAudioGenerationTool()    
 
@@ -465,7 +500,7 @@ class TextToMovieAgent(BaseAgent):
             {style.lighting_style}, {style.color_grading}.
             Photorealistic, detailed, high quality, masterful composition.
             """
-        else:  # Kling
+        elif engine == "kling" or engine == "videodb":
             initial_prompt = f"""
             {style.director_reference} style shot. 
             Filmed on {style.camera_setup}.
@@ -484,21 +519,32 @@ class TextToMovieAgent(BaseAgent):
             
             Mood: {style.film_mood}
             """
-
-            # Run through LLM to compress while maintaining structure
-            compression_prompt = f"""
-            Compress the following prompt to under 2450 characters while maintaining its structure and key information:
-
-            {initial_prompt}
+        elif engine == "volcengine":
+            initial_prompt = f"""
+            {style.director_reference} style.
+            Filmed on {style.camera_setup}.
+            {scene['scene_description']}
+            Characters: {json.dumps(style.character_constants)}
+            Settings: {json.dumps(style.setting_constants)}
+            Lighting: {style.lighting_style}. Colors: {style.color_grading}.
             """
+        else:
+            initial_prompt = f"{scene['scene_description']}"
 
-            compression_message = ContextMessage(
-                content=compression_prompt, role=RoleTypes.user
-            )
-            llm_response = self.llm.chat_completions(
-                [compression_message.to_llm_msg()], response_format={"type": "text"}
-            )
-            return llm_response.content
+        # Run through LLM to compress while maintaining structure
+        compression_prompt = f"""
+        Compress the following prompt to under 2450 characters while maintaining its structure and key information:
+
+        {initial_prompt}
+        """
+
+        compression_message = ContextMessage(
+            content=compression_prompt, role=RoleTypes.user
+        )
+        llm_response = self.llm.chat_completions(
+            [compression_message.to_llm_msg()], response_format={"type": "text"}
+        )
+        return llm_response.content
 
     def generate_audio_prompt(self, storyline: str) -> str:
         """Generate minimal, music-focused prompt for ElevenLabs."""

@@ -6,6 +6,7 @@ from director.llm.openai import OpenAI
 from director.llm.anthropic import AnthropicAI
 from director.llm.googleai import GoogleAI
 from director.llm.videodb_proxy import VideoDBProxy
+from director.llm.volcengine_ark import VolcengineArkAI
 
 
 def get_default_llm():
@@ -14,6 +15,7 @@ def get_default_llm():
     openai = True if os.getenv("OPENAI_API_KEY") else False
     anthropic = True if os.getenv("ANTHROPIC_API_KEY") else False
     googleai = True if os.getenv("GOOGLEAI_API_KEY") else False
+    volcengine = True if os.getenv("ARK_API_KEY") else False
 
     default_llm = os.getenv("DEFAULT_LLM")
 
@@ -23,5 +25,7 @@ def get_default_llm():
         return AnthropicAI()
     elif googleai or default_llm == LLMType.GOOGLEAI:
         return GoogleAI()
+    elif volcengine or default_llm == LLMType.VOLCENGINE:
+        return VolcengineArkAI()
     else:
         return VideoDBProxy()
