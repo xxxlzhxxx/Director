@@ -17,6 +17,7 @@ from director.entrypoint.api.socket_io import ChatNamespace
 from dotenv import load_dotenv
 
 load_dotenv()
+load_dotenv(".env.local", override=True)
 
 socketio = SocketIO()
 
@@ -50,6 +51,7 @@ def create_app(app_config: object):
 
     with app.app_context():
         from director.entrypoint.api import errors
+        errors.handle_exception
 
     # register blueprints
     app.register_blueprint(agent_bp)

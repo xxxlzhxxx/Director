@@ -1,7 +1,4 @@
 import logging
-import asyncio
-
-from director.utils.asyncio import is_event_loop_running
 from director.agents.base import BaseAgent, AgentResponse, AgentStatus
 from director.core.session import (
     Session,

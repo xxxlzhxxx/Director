@@ -136,7 +136,7 @@ class VideoDBTool:
         except ValueError as ve:
             logging.error(f"ValueError while deleting video: {ve}")
             raise ve
-        except Exception as e:
+        except Exception:
             logging.exception(
                 f"Unexpected error occurred while deleting video {video_id}"
             )
@@ -333,6 +333,12 @@ class VideoDBTool:
         stream_url = timeline.generate_stream()
         return stream_url
 
+    def concat_videos(self, video_ids):
+        timeline = Timeline(self.conn)
+        for video_id in video_ids:
+            timeline.add_inline(VideoAsset(asset_id=video_id))
+        return timeline.generate_stream()
+
     def get_and_set_timeline(self):
         self.timeline = Timeline(self.conn)
         return self.timeline
@@ -443,7 +449,7 @@ class VideoDBTool:
         except ValueError as ve:
             logging.error(f"ValueError while deleting video: {ve}")
             raise ve
-        except Exception as e:
+        except Exception:
             logging.exception(
                 f"Unexpected error occurred while deleting video {audio_id}"
             )
@@ -470,7 +476,7 @@ class VideoDBTool:
         except ValueError as ve:
             logging.error(f"ValueError while deleting video: {ve}")
             raise ve
-        except Exception as e:
+        except Exception:
             logging.exception(
                 f"Unexpected error occurred while deleting video {image_id}"
             )

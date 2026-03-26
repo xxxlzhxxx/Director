@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { ChatInterface } from "@videodb/chat-vue";
 import "@videodb/chat-vue/dist/style.css";
 
-const BACKEND_URL = import.meta.env.VITE_APP_BACKEND_URL;
+const BACKEND_URL = (import.meta.env.VITE_APP_BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 const chatInterfaceRef = ref(null);
 
 const handleKeyDown = (event) => {

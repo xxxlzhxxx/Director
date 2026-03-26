@@ -20,6 +20,7 @@ class LLMType(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLEAI = "googleai"
+    ARK = "ark"
     VIDEODB_PROXY = "videodb_proxy"
 
 
@@ -29,5 +30,7 @@ class EnvPrefix(str, Enum):
     OPENAI_ = "OPENAI_"
     ANTHROPIC_ = "ANTHROPIC_"
     GOOGLEAI_ = "GOOGLEAI_"
+    ARK_ = "ARK_"
 
 DOWNLOADS_PATH="director/downloads"
+RUNS_PATH="director/runs"

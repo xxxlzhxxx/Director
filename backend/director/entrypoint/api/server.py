@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from director.entrypoint.api import create_app
 
 load_dotenv()
+load_dotenv(".env.local", override=True)
 
 
 LOGGING_CONFIG = {

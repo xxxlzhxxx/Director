@@ -1,4 +1,3 @@
-import os
 import fal_client
 import requests
 from typing import Optional

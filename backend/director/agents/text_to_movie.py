@@ -4,6 +4,8 @@ import json
 import uuid
 from typing import List, Optional, Dict
 from dataclasses import dataclass
+import re
+from pathlib import Path
 
 from videodb.asset import VideoAsset, AudioAsset
 from director.agents.base import BaseAgent, AgentResponse, AgentStatus
@@ -25,14 +27,32 @@ from director.tools.elevenlabs import (
     ElevenLabsTool,
     PARAMS_CONFIG as ELEVENLABS_PARAMS_CONFIG,
 )
+from director.tools.ark_video import ArkVideoGenerationTool
 from director.tools.videodb_tool import VDBAudioGenerationTool, VDBVideoGenerationTool, VideoDBTool
-from director.constants import DOWNLOADS_PATH
 
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_ENGINES = ["stabilityai", "kling", "videodb"]
+SUPPORTED_ENGINES = ["stabilityai", "kling", "videodb", "ark"]
 SUPPORTED_AUDIO_ENGINES = ["elevenlabs", "videodb"]
+
+
+def _load_ark_video_from_llm_env(
+    md_path: str = "/Users/bytedance/Desktop/Workspace/code/LLM_env.md",
+) -> tuple[Optional[str], Optional[str]]:
+    path = Path(md_path)
+    if not path.exists():
+        return None, None
+    text = path.read_text(encoding="utf-8")
+    api_key = None
+    model = None
+    m_key = re.search(r"API Key:\s*([^\s]+)", text)
+    if m_key:
+        api_key = m_key.group(1)
+    m_video = re.search(r"doubao-seedance-2-0-260128\)\s*\nEndpoint:\s*(ep-[\w-]+)", text)
+    if m_video:
+        model = m_video.group(1)
+    return api_key, model
 TEXT_TO_MOVIE_AGENT_PARAMETERS = {
     "type": "object",
     "properties": {
@@ -78,6 +98,24 @@ TEXT_TO_MOVIE_AGENT_PARAMETERS = {
                     "type": "object",
                     "description": "Optional configuration for Kling engine",
                     "properties": KLING_PARAMS_CONFIG["text_to_video"],
+                },
+                "video_ark_config": {
+                    "type": "object",
+                    "description": "Optional configuration for Ark video generation (e.g. Seedance 2.0 endpoint)",
+                    "properties": {
+                        "model": {"type": "string"},
+                        "resolution": {"type": "string"},
+                        "ratio": {"type": "string"},
+                        "seed": {"type": "integer"},
+                        "camera_fixed": {"type": "boolean"},
+                        "watermark": {"type": "boolean"},
+                        "generate_audio": {"type": "boolean"},
+                        "draft": {"type": "boolean"},
+                        "return_last_frame": {"type": "boolean"},
+                        "service_tier": {"type": "string"},
+                        "execution_expires_after": {"type": "integer"},
+                        "callback_url": {"type": "string"},
+                    },
                 },
                 "audio_elevenlabs_config": {
                     "type": "object",
@@ -152,6 +190,12 @@ class TextToMovieAgent(BaseAgent):
                 preferred_style="cinematic",
                 prompt_format="detailed",
             ),
+            "ark": EngineConfig(
+                name="ark",
+                max_duration=12,
+                preferred_style="cinematic",
+                prompt_format="detailed",
+            ),
         }
         super().__init__(session=session, **kwargs)
 
@@ -174,6 +218,9 @@ class TextToMovieAgent(BaseAgent):
         """
         try:
             self.videodb_tool = VideoDBTool(collection_id=collection_id)
+            run_dir = self.session.state.get("run_dir")
+            if not isinstance(run_dir, str) or not run_dir:
+                raise Exception("run_dir not initialized")
             self.output_message.actions.append("Processing input...")
             video_content = VideoContent(
                 agent_name=self.agent_name,
@@ -205,6 +252,23 @@ class TextToMovieAgent(BaseAgent):
             elif engine == "videodb":
                 self.video_gen_config_key = "video_kling_config"
                 self.video_gen_tool = VDBVideoGenerationTool()
+            elif engine == "ark":
+                ARK_API_KEY = os.getenv("ARK_API_KEY")
+                if not ARK_API_KEY:
+                    fallback_key, fallback_model = _load_ark_video_from_llm_env()
+                    if fallback_key:
+                        ARK_API_KEY = fallback_key
+                    if fallback_model and not os.getenv("ARK_VIDEO_MODEL") and not os.getenv("ARK_SEEDANCE_MODEL"):
+                        os.environ["ARK_VIDEO_MODEL"] = fallback_model
+                if not ARK_API_KEY:
+                    raise Exception("ARK API key not found")
+                ARK_BASE_URL = os.getenv(
+                    "ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"
+                )
+                self.video_gen_tool = ArkVideoGenerationTool(
+                    api_key=ARK_API_KEY, base_url=ARK_BASE_URL
+                )
+                self.video_gen_config_key = "video_ark_config"
             else:
                 raise Exception(f"{engine} not supported")
 
@@ -223,6 +287,8 @@ class TextToMovieAgent(BaseAgent):
             if job_type == "text_to_movie":
                 raw_storyline = text_to_movie.get("storyline", [])
                 video_gen_config = text_to_movie.get(self.video_gen_config_key, {})
+                if engine == "ark" and isinstance(video_gen_config, dict) and not video_gen_config.get("model"):
+                    video_gen_config["model"] = os.getenv("ARK_VIDEO_MODEL") or os.getenv("ARK_SEEDANCE_MODEL")
 
                 if engine == "videodb":
                     audio_gen_config = {}
@@ -231,13 +297,18 @@ class TextToMovieAgent(BaseAgent):
 
                 # Generate visual style
                 visual_style = self.generate_visual_style(raw_storyline)
-                print("These are visual styles", visual_style)
+                os.makedirs(os.path.join(run_dir, "script"), exist_ok=True)
+                with open(os.path.join(run_dir, "script", "storyline.txt"), "w", encoding="utf-8") as f:
+                    f.write(str(raw_storyline))
+                with open(os.path.join(run_dir, "script", "visual_style.json"), "w", encoding="utf-8") as f:
+                    json.dump(visual_style.__dict__, f, ensure_ascii=False, indent=2)
 
                 # Generate scenes
                 scenes = self.generate_scene_sequence(
                     raw_storyline, visual_style, engine
                 )
-                print("These are scenes", scenes)
+                with open(os.path.join(run_dir, "script", "scenes.json"), "w", encoding="utf-8") as f:
+                    json.dump({"scenes": scenes}, f, ensure_ascii=False, indent=2)
 
                 self.output_message.actions.append(
                     f"Generating {len(scenes)} videos..."
@@ -259,12 +330,8 @@ class TextToMovieAgent(BaseAgent):
                     )
                     # Generate engine-specific prompt
                     prompt = self.generate_engine_prompt(scene, visual_style, engine)
-
-                    print(f"Generating video for scene {index + 1}...")
-                    print("This is the prompt", prompt)
-
-                    video_path = f"{DOWNLOADS_PATH}/{str(uuid.uuid4())}.mp4"
-                    os.makedirs(DOWNLOADS_PATH, exist_ok=True)
+                    os.makedirs(os.path.join(run_dir, "results"), exist_ok=True)
+                    video_path = os.path.join(run_dir, "results", f"scene_{index + 1}_{uuid.uuid4().hex}.mp4")
 
                     video = self.video_gen_tool.text_to_video(
                         prompt=prompt,
@@ -306,9 +373,6 @@ class TextToMovieAgent(BaseAgent):
                     total_duration += float(media.get("length", 0))
                     scenes[result.step_index]["video"] = media
 
-                    if os.path.exists(result.video_path):
-                        os.remove(result.video_path)
-
                 # Generate audio prompt
                 sound_effects_description = self.generate_audio_prompt(raw_storyline)
 
@@ -316,8 +380,8 @@ class TextToMovieAgent(BaseAgent):
                 self.output_message.push_update()
 
                 # Generate and add sound effects
-                os.makedirs(DOWNLOADS_PATH, exist_ok=True)
-                sound_effects_path = f"{DOWNLOADS_PATH}/{str(uuid.uuid4())}.mp3"
+                os.makedirs(os.path.join(run_dir, "results"), exist_ok=True)
+                sound_effects_path = os.path.join(run_dir, "results", f"sound_effects_{uuid.uuid4().hex}.mp3")
 
                 sound_effects_media = self.audio_gen_tool.generate_sound_effect(
                     prompt=sound_effects_description,
@@ -335,9 +399,6 @@ class TextToMovieAgent(BaseAgent):
                     sound_effects_media = self.videodb_tool.upload(
                         sound_effects_path, source_type="file_path", media_type="audio"
                     )
-
-                if os.path.exists(sound_effects_path):
-                    os.remove(sound_effects_path)
 
                 self.output_message.actions.append(
                     "Combining assets into final video..."

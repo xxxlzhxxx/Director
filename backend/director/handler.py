@@ -76,6 +76,9 @@ class ChatHandler:
     def add_videodb_state(self, session):
         from videodb import connect
 
+        if not os.getenv("VIDEO_DB_API_KEY"):
+            return
+
         session.state["conn"] = connect(
             base_url=os.getenv("VIDEO_DB_BASE_URL", "https://api.videodb.io")
         )
@@ -88,14 +91,20 @@ class ChatHandler:
             )
 
     def agents_list(self):
-        return [
-            {
-                "name": agent_instance.name,
-                "description": agent_instance.agent_description,
-            }
-            for agent in self.agents
-            for agent_instance in [agent(Session(db=self.db))]
-        ]
+        session = Session(db=self.db)
+        out = []
+        for agent in self.agents:
+            try:
+                agent_instance = agent(session=session)
+                out.append(
+                    {
+                        "name": agent_instance.name,
+                        "description": agent_instance.agent_description,
+                    }
+                )
+            except Exception:
+                continue
+        return out
 
     def chat(self, message):
         logger.info(f"ChatHandler input message: {message}")
@@ -173,10 +182,6 @@ class VideoDBHandler:
     def delete_image(self, image_id):
         """Delete a specific image by its ID."""
         return self.videodb_tool.delete_image(image_id)
-
-    def delete_audio(self, video_id):
-        """Delete a specific audio by its ID."""
-        return self.videodb_tool.delete_audio(video_id)
 
     def get_videos(self):
         """Get all videos in a collection."""

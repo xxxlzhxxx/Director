@@ -78,7 +78,7 @@ class CloneVoiceAgent(BaseAgent):
         super().__init__(session=session, **kwargs)
         
 
-    def _download_audio_file(self, audio_url: str) -> str | None:
+    def _download_audio_file(self, audio_url: str):
         os.makedirs(DOWNLOADS_PATH, exist_ok=True)
         try:
             self.output_message.actions.append("Downloading sample audio URL")
@@ -101,7 +101,7 @@ class CloneVoiceAgent(BaseAgent):
             logger.error(f"Failed to download {audio_url}: {e}")
             return None
         
-    def _download_video_file(self, video_url: str) -> str | None:
+    def _download_video_file(self, video_url: str):
         os.makedirs(DOWNLOADS_PATH, exist_ok=True)
 
         try:
@@ -124,7 +124,7 @@ class CloneVoiceAgent(BaseAgent):
             print(f"Failed to download {video_url}: {e}")
             return None
         
-    def _download_audio_from_video(self, audio_source: dict) -> str | None:
+    def _download_audio_from_video(self, audio_source: dict):
         required_keys = {"video_id", "collection_id", "start_time", "end_time"}
         if not isinstance(audio_source, dict) or not required_keys.issubset(audio_source.keys()):
             return None

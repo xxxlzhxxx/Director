@@ -17,3 +17,8 @@ package-lock.json
 *.mjs
 site/*
 backend/director/downloads
+cases/
+backend/director/runs/
+backend/.env.local
+frontend/.env.local
+LLM_env.md
