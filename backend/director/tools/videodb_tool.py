@@ -250,6 +250,22 @@ class VideoDBTool:
             "url": image.url,
         }
 
+    def extract_last_frame(self, video_id: str, epsilon_s: float = 0.2):
+        video = self.collection.get_video(video_id)
+        length = getattr(video, "length", None)
+        try:
+            length_s = float(length) if length is not None else 0.0
+        except Exception:
+            length_s = 0.0
+        t = max(length_s - float(epsilon_s), 0.0)
+        image = video.generate_thumbnail(time=t)
+        return {
+            "id": image.id,
+            "collection_id": image.collection_id,
+            "name": image.name,
+            "url": image.url,
+        }
+
     def get_transcript(self, video_id: str, text=True):
         video = self.collection.get_video(video_id)
         if text:

@@ -249,6 +249,8 @@ class VideoGenerationAgent(BaseAgent):
                 duration = text_to_video.get("duration", 5)
                 config = text_to_video.get(config_key, {})
                 if engine == "ark" and isinstance(config, dict):
+                    if "resolution" not in config or config.get("resolution") is None:
+                        config["resolution"] = "720p"
                     model_val = config.get("model")
                     if not isinstance(model_val, str) or not model_val.startswith("ep-"):
                         config["model"] = os.getenv("ARK_VIDEO_MODEL") or os.getenv("ARK_SEEDANCE_MODEL")
@@ -262,6 +264,7 @@ class VideoGenerationAgent(BaseAgent):
                     if total != int(duration):
                         seg_durations[-1] = int(duration) - sum(seg_durations[:-1])
                     uploaded_segments = []
+                    prev_frame_url = None
                     for i, seg_d in enumerate(seg_durations, start=1):
                         seg_prompt = (
                             f"{prompt}\n"
@@ -278,12 +281,21 @@ class VideoGenerationAgent(BaseAgent):
                             f"Generating segment {i}/{seg_count} using <b>{engine}</b> (duration {seg_d}s)"
                         )
                         self.output_message.push_update()
-                        video_gen_tool.text_to_video(
-                            prompt=seg_prompt,
-                            save_at=seg_output,
-                            duration=seg_d,
-                            config=config,
-                        )
+                        if prev_frame_url and hasattr(video_gen_tool, "image_to_video"):
+                            video_gen_tool.image_to_video(
+                                image_url=prev_frame_url,
+                                save_at=seg_output,
+                                duration=seg_d,
+                                config=config,
+                                prompt=seg_prompt,
+                            )
+                        else:
+                            video_gen_tool.text_to_video(
+                                prompt=seg_prompt,
+                                save_at=seg_output,
+                                duration=seg_d,
+                                config=config,
+                            )
                         self.output_message.actions.append("Uploading segment to VideoDB")
                         self.output_message.push_update()
                         uploaded = self.videodb_tool.upload(
@@ -293,6 +305,10 @@ class VideoGenerationAgent(BaseAgent):
                             name=f"{video_name} [{i}/{seg_count}]",
                         )
                         uploaded_segments.append(uploaded)
+                        self.output_message.actions.append("Extracting last frame for continuity")
+                        self.output_message.push_update()
+                        last_frame = self.videodb_tool.extract_last_frame(uploaded["id"])
+                        prev_frame_url = self._super_resolve_frame(last_frame.get("url"))
                     self.output_message.actions.append("Concatenating segments in VideoDB")
                     self.output_message.push_update()
                     stream_url = self.videodb_tool.concat_videos([s["id"] for s in uploaded_segments])
@@ -323,6 +339,8 @@ class VideoGenerationAgent(BaseAgent):
                 config = image_to_video.get(config_key, {})
                 prompt = image_to_video.get("prompt")
                 if engine == "ark" and isinstance(config, dict):
+                    if "resolution" not in config or config.get("resolution") is None:
+                        config["resolution"] = "720p"
                     model_val = config.get("model")
                     if not isinstance(model_val, str) or not model_val.startswith("ep-"):
                         config["model"] = os.getenv("ARK_VIDEO_MODEL") or os.getenv("ARK_SEEDANCE_MODEL")
@@ -448,6 +466,9 @@ class VideoGenerationAgent(BaseAgent):
                 "video_content": video_content,
             },
         )
+
+    def _super_resolve_frame(self, image_url: Optional[str]):
+        return image_url
 
 
 def _load_ark_from_llm_env() -> tuple[Optional[str], Optional[str]]:
